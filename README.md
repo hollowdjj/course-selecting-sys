@@ -1,1 +1,1 @@
-# techtrainingcamp-CourseSelectionSystem
+# course selecting system
