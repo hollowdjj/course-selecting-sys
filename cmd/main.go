@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/hollowdjj/course-selecting-sys/models"
+	"github.com/hollowdjj/course-selecting-sys/pkg/gredis"
 	"github.com/hollowdjj/course-selecting-sys/pkg/setting"
 	"github.com/hollowdjj/course-selecting-sys/routers"
 	"log"
@@ -13,6 +14,7 @@ import (
 func init() {
 	setting.Setup()
 	models.Setup()
+	gredis.SetUp()
 }
 
 func main() {

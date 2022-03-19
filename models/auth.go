@@ -2,24 +2,23 @@ package models
 
 import "gorm.io/gorm"
 
-type CookieValue struct {
-	UserID   uint64
-	UserType int
-}
+//检查用户名和密码是否正确
+func CheckAuth(username, password string) (bool, MemberInfo, error) {
+	var member MemberInfo
+	err := db.Model(&Member{}).Select("user_id", "user_type").
+		Where("username = ? AND password = ? AND is_active = ?", username, password, 1).
+		First(&member).Error
 
-//检查用户名和密码是否正确。
-//用户名不存在或者用户名存在，但是密码不正确时。返回(false,nil,0)
-//用户名和密码正确时，返回(true,nil,UserID)
-//遇到非gorm.ErrRecordNotFound的错误时，返回(false,err,0)
-func CheckAuth(username, password string) (bool, error, CookieValue) {
-	var a CookieValue
-	err := db.Model(&Member{}).Where("username = ? AND password = ? AND is_active = ?",
-		username, password, 1).First(&a).Error
 	if err != nil && err != gorm.ErrRecordNotFound {
-		return false, err, CookieValue{}
+		//发生错误
+		return false, MemberInfo{}, err
 	}
-	if a.UserID > 0 {
-		return true, nil, a
+
+	if member.UserID > 0 {
+		//用户名存在且密码正确
+		return true, member, nil
 	}
-	return false, nil, CookieValue{}
+
+	//用户名不存在
+	return false, MemberInfo{}, nil
 }

@@ -24,6 +24,7 @@ type Member struct {
 //用于返回查询到的成员信息
 type MemberInfo struct {
 	UserID   uint64 `json:"user_id"`
+	UserType int    `json:"user_type"`
 	Username string `json:"username"`
 	Nickname string `json:"nickname"`
 }
