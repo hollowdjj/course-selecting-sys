@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm/schema"
 )
 
-var db *gorm.DB //数据库
+var Db *gorm.DB //数据库
 
 //连接数据库
 func Setup() {
@@ -19,7 +19,7 @@ func Setup() {
 		setting.DatabaseSetting.Password,
 		setting.DatabaseSetting.Host,
 		setting.DatabaseSetting.Name)
-	db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
+	Db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
 		NamingStrategy: schema.NamingStrategy{
 			SingularTable: true,
 		},
@@ -27,12 +27,12 @@ func Setup() {
 	if err != nil {
 		panic(err)
 	}
-	mysqlDB, _ := db.DB()
+	mysqlDB, _ := Db.DB()
 	mysqlDB.SetMaxIdleConns(10)
 	mysqlDB.SetMaxOpenConns(100)
 }
 
 func CloseDB() {
-	mysqlDB, _ := db.DB()
+	mysqlDB, _ := Db.DB()
 	mysqlDB.Close()
 }

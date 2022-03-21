@@ -1,6 +1,9 @@
 package models
 
-import "gorm.io/gorm"
+import (
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
 
 //成员类型
 type UserType int
@@ -43,19 +46,22 @@ type teacher struct {
 
 //通过ID查询用户是否已存在。
 //若存在，返回(true,nil)；若不存在，返回(false,nil)；若发生错误，返回(false,err)
-func IsUserExistByID(id uint64) (bool, error) {
-	type temp struct {
-		UserID uint64
+func IsUserExistByID(id uint64, forUpdate bool) (bool, error) {
+	var err error
+	if forUpdate {
+		err = Db.Model(&Member{}).Where("user_id = ?", id).Clauses(clause.Locking{Strength: "UPDATE"}).Error
+	} else {
+		err = Db.Model(&Member{}).Where("user_id = ?", id).Error
 	}
-	var t temp
-	err := db.Model(&Member{}).Where("user_id = ?", id).First(&t).Error
-	if err != nil && err != gorm.ErrRecordNotFound {
+
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return false, nil
+		}
 		return false, err
 	}
-	if t.UserID > 0 {
-		return true, nil
-	}
-	return false, nil
+
+	return true, nil
 }
 
 //通过username查询用户是否已存在
@@ -65,7 +71,7 @@ func IsUserExistByName(username string) (bool, error) {
 		UserID uint64
 	}
 	var t temp
-	err := db.Model(&Member{}).Where("username = ?", username).First(&t).Error
+	err := Db.Model(&Member{}).Where("username = ?", username).First(&t).Error
 	if err != nil && err != gorm.ErrRecordNotFound {
 		return false, err
 	}
@@ -80,16 +86,20 @@ func IsUserExistByName(username string) (bool, error) {
 //若发生错误，返回(false,err)
 //若用户存在，但是已删除状态(is_active=0)，返回(true,nil);
 //若用户存在，但不是删除状态(is_active=1)，返回(false,nil)
-func IsUserDeleted(id uint64) (bool, error) {
-	type temp struct {
-		IsActive int
+func IsUserDeleted(id uint64, forUpdate bool) (bool, error) {
+	var member Member
+	var err error
+	if !forUpdate {
+		err = Db.Model(&Member{}).Select("is_active").Where("user_id = ?", id).First(&member).Error
+	} else {
+		err = Db.Model(&Member{}).Select("is_active").Where("user_id = ?", id).
+			Clauses(clause.Locking{Strength: "UPDATE"}).First(&member).Error
 	}
-	var t temp
-	err := db.Model(&Member{}).Where("user_id = ?", id).First(&t).Error
+
 	if err != nil {
 		return false, err
 	}
-	if t.IsActive == 0 {
+	if member.IsActive == 0 {
 		return true, nil
 	}
 	return false, nil
@@ -98,7 +108,7 @@ func IsUserDeleted(id uint64) (bool, error) {
 //创建成员
 func CreateMember(user *Member) error {
 	//创建成员
-	err := db.Model(&Member{}).Create(user).Error
+	err := Db.Model(&Member{}).FirstOrCreate(user, *user).Error
 	if err != nil {
 		return err
 	}
@@ -107,10 +117,10 @@ func CreateMember(user *Member) error {
 	switch UserType(user.UserType) {
 	case Student:
 		s := student{StudentID: user.UserID, StudentName: user.Username}
-		err = db.Create(&s).Error
+		err = Db.FirstOrCreate(&s).Error
 	case Teacher:
 		t := teacher{TeacherID: user.UserID, TeacherName: user.Username}
-		err = db.Create(&t).Error
+		err = Db.FirstOrCreate(&t).Error
 	}
 
 	if err != nil {
@@ -121,7 +131,7 @@ func CreateMember(user *Member) error {
 
 //更新成员的nickname
 func UpdateMember(id uint64, nickname string) error {
-	err := db.Model(&Member{}).Where("user_id = ?", id).Update("nickname", nickname).Error
+	err := Db.Model(&Member{}).Where("user_id = ?", id).Update("nickname", nickname).Error
 	if err != nil {
 		return err
 	}
@@ -130,7 +140,7 @@ func UpdateMember(id uint64, nickname string) error {
 
 //删除成员(软删除)
 func DeleteMember(id uint64) error {
-	err := db.Model(&Member{}).Where("user_id = ?", id).Update("is_active", 0).Error
+	err := Db.Model(&Member{}).Where("user_id = ?", id).Update("is_active", 0).Error
 	if err != nil {
 		return err
 	}
@@ -140,7 +150,7 @@ func DeleteMember(id uint64) error {
 //获取单个成员的信息
 func GetUserInfo(id uint64) (MemberInfo, error) {
 	var u MemberInfo
-	err := db.Model(&Member{}).Where("user_id = ?", id).First(&u).Error
+	err := Db.Model(&Member{}).Where("user_id = ?", id).First(&u).Error
 	if err != nil {
 		return MemberInfo{}, err
 	}
@@ -149,7 +159,7 @@ func GetUserInfo(id uint64) (MemberInfo, error) {
 
 //批量返回成员信息
 func GetUserInfoList(offset int, limit int) (members []MemberInfo, err error) {
-	err = db.Model(&Member{}).Where("is_active = ?", 1).Offset(offset).
+	err = Db.Model(&Member{}).Where("is_active = ?", 1).Offset(offset).
 		Limit(limit).Find(&members).Error
 	if err != nil {
 		return members, err

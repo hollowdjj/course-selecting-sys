@@ -27,7 +27,7 @@ func CreateCourse(c *gin.Context) {
 		form CreateCourseForm
 	)
 	//表单验证
-	httpCode, errCode := app.BindAndValid(c, &form)
+	httpCode, errCode := app.BindAndValid(c, &form, false)
 	if errCode != e.OK {
 		appG.Response(httpCode, errCode, nil)
 		return
@@ -70,7 +70,7 @@ func GetCourse(c *gin.Context) {
 	)
 
 	//表单验证
-	httpCode, errCode := app.BindAndValid(c, &form)
+	httpCode, errCode := app.BindAndValid(c, &form, false)
 	if errCode != e.OK {
 		appG.Response(httpCode, errCode, nil)
 		return
@@ -108,7 +108,7 @@ func BindCourse(c *gin.Context) {
 	)
 
 	//表单验证
-	httpCode, errCode := app.BindAndValid(c, &form)
+	httpCode, errCode := app.BindAndValid(c, &form, true)
 	if errCode != e.OK {
 		appG.Response(httpCode, errCode, nil)
 		return
@@ -153,7 +153,7 @@ func UnBindCourse(c *gin.Context) {
 	)
 
 	//表单验证
-	httpCode, errCode := app.BindAndValid(c, &form)
+	httpCode, errCode := app.BindAndValid(c, &form, true)
 	if errCode != e.OK {
 		appG.Response(httpCode, errCode, nil)
 		return
@@ -200,7 +200,7 @@ func GetTeacherCourses(c *gin.Context) {
 	)
 
 	//表单验证
-	httpCode, errCode := app.BindAndValid(c, &form)
+	httpCode, errCode := app.BindAndValid(c, &form, false)
 	if errCode != e.OK {
 		appG.Response(httpCode, errCode, nil)
 		return

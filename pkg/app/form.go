@@ -11,10 +11,14 @@ import (
 type CustomFunc map[string]func(v *validation.Validation, obj interface{}, key string)
 
 //表单验证。返回http状态码以及参数检验的错误代码
-func BindAndValid(c *gin.Context, form interface{}) (int, e.ErrNo) {
-	//将请求中的对应参数绑定到了form中
-	//err := c.MustBindWith(form,binding.Query)
-	err := c.ShouldBindQuery(form)
+func BindAndValid(c *gin.Context, form interface{}, json bool) (int, e.ErrNo) {
+	var err error
+	if json {
+		err = c.BindJSON(form)
+	} else {
+		err = c.BindQuery(form)
+	}
+
 	if err != nil {
 		return http.StatusBadRequest, e.ParamInvalid
 	}
@@ -34,9 +38,14 @@ func BindAndValid(c *gin.Context, form interface{}) (int, e.ErrNo) {
 }
 
 //支持自定义表单验证函数
-func BindAndValidCustom(c *gin.Context, form interface{}, funcs CustomFunc) (int, e.ErrNo) {
-	//先将请求中的参数绑定到form中
-	err := c.ShouldBindQuery(form)
+func BindAndValidCustom(c *gin.Context, form interface{}, funcs CustomFunc, json bool) (int, e.ErrNo) {
+	var err error
+	if json {
+		err = c.BindJSON(form)
+	} else {
+		err = c.BindQuery(form)
+	}
+
 	if err != nil {
 		return http.StatusBadRequest, e.ParamInvalid
 	}

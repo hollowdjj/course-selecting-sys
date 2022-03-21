@@ -3,9 +3,11 @@ package auth_service
 import (
 	"github.com/go-redis/redis"
 	"github.com/hollowdjj/course-selecting-sys/models"
+	"github.com/hollowdjj/course-selecting-sys/pkg/e"
 	"github.com/hollowdjj/course-selecting-sys/pkg/gredis"
 	"github.com/hollowdjj/course-selecting-sys/pkg/logging"
 	"github.com/hollowdjj/course-selecting-sys/pkg/utility"
+	"github.com/hollowdjj/course-selecting-sys/service/memeber_service"
 	"time"
 )
 
@@ -31,16 +33,27 @@ func (a *Auth) Login() (bool, string, error) {
 
 	//生成新的token
 	token := utility.GenerateToken()
-	err = gredis.Set(a.Username, token, 10*time.Second)
+	err = gredis.Rdb.Set(a.Username, token, 24*time.Hour).Err()
 	if err != nil {
 		logging.Error(err)
 		return false, "", err
 	}
-	err = gredis.Set(token, member, 10*time.Second)
+	err = gredis.Set(token, member, 24*time.Hour)
 	if err != nil {
 		logging.Error(err)
 		return false, "", err
 	}
 
 	return true, token, nil
+}
+
+//根据token判断用户是否是管理员
+func IsAdmin(token string) (int, e.ErrNo) {
+	var member models.MemberInfo
+	httpCode, errCode := memeber_service.GetMemberInfoFromRedis(token, &member)
+	if member.UserType != 1 {
+		errCode = e.PermDenied
+	}
+
+	return httpCode, errCode
 }

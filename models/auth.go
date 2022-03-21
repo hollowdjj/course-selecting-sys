@@ -5,8 +5,7 @@ import "gorm.io/gorm"
 //检查用户名和密码是否正确
 func CheckAuth(username, password string) (bool, MemberInfo, error) {
 	var member MemberInfo
-	err := db.Model(&Member{}).Select("user_id", "user_type").
-		Where("username = ? AND password = ? AND is_active = ?", username, password, 1).
+	err := Db.Model(&Member{}).Where("username = ? AND password = ? AND is_active = ?", username, password, 1).
 		First(&member).Error
 
 	if err != nil && err != gorm.ErrRecordNotFound {

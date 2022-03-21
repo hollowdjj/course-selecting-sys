@@ -18,7 +18,7 @@ type Course struct {
 //根据课程名称查询课程是否已存在
 func IsCourseExistByName(name string) (bool, error) {
 	var course Course
-	err := db.Model(&Course{}).Select("course_id").
+	err := Db.Model(&Course{}).Select("course_id").
 		Where("course_name = ?", name).First(&course).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -37,7 +37,7 @@ func IsCourseExistByName(name string) (bool, error) {
 //根据课程ID查询课程是否已存在
 func IsCourseExistByID(id uint64) (bool, error) {
 	var course Course
-	err := db.Model(&Course{}).Select("course_id").
+	err := Db.Model(&Course{}).Select("course_id").
 		Where("course_id = ?", id).First(&course).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -59,7 +59,7 @@ func IsCourseExistByID(id uint64) (bool, error) {
 //课程存在，但已绑定时，返回true,nil
 func IsCourseBound(id uint64) (bool, error) {
 	var course Course
-	err := db.Model(&Course{}).Select("teacher_id").
+	err := Db.Model(&Course{}).Select("teacher_id").
 		Where("course_id = ?", id).First(&course).Error
 	if err != nil {
 		if err != gorm.ErrRecordNotFound {
@@ -76,7 +76,7 @@ func IsCourseBound(id uint64) (bool, error) {
 //创建课程并返回课程的ID
 func CreateCourse(name string, cap uint) (uint64, error) {
 	course := Course{CourseName: name, Cap: cap, RemainCap: cap}
-	err := db.Model(&Course{}).Create(&course).Error
+	err := Db.Model(&Course{}).Create(&course).Error
 	if err != nil {
 		logging.Error(err)
 		return 0, err
@@ -93,7 +93,7 @@ type CourseInfo struct {
 //根据课程ID获取课程信息
 func GetCourseInfo(id uint64) (CourseInfo, error) {
 	var info CourseInfo
-	err := db.Model(&Course{}).Where("course_id = ?", id).First(&info).Error
+	err := Db.Model(&Course{}).Where("course_id = ?", id).First(&info).Error
 	if err != nil {
 		if err != gorm.ErrRecordNotFound {
 			logging.Error(err)
@@ -105,7 +105,7 @@ func GetCourseInfo(id uint64) (CourseInfo, error) {
 
 //绑定课程。即将Course表中对应课程的teacher_id字段更更新为teacherID
 func BindCourse(courseID, teacherID uint64) error {
-	err := db.Model(&Course{}).Where("course_id = ?", courseID).
+	err := Db.Model(&Course{}).Where("course_id = ?", courseID).
 		Update("teacher_id", teacherID).Error
 	if err != nil {
 		logging.Error(err)
@@ -116,7 +116,7 @@ func BindCourse(courseID, teacherID uint64) error {
 
 //解绑课程。即将Course表对应课程的teacher_id字段更新为0
 func UnBindCourse(courseID, teacherID uint64) error {
-	err := db.Model(&Course{}).Where("course_id = ? AND teacher_id = ?", courseID, teacherID).
+	err := Db.Model(&Course{}).Where("course_id = ? AND teacher_id = ?", courseID, teacherID).
 		Update("teacher_id", 0).Error
 
 	if err != nil {
@@ -129,7 +129,7 @@ func UnBindCourse(courseID, teacherID uint64) error {
 //查询一个老师的全部课程
 func GetTeacherCourses(teacherID uint64) ([]CourseInfo, error) {
 	courses := make([]CourseInfo, 0)
-	err := db.Model(&Course{}).Where("teacher_id = ?", teacherID).Find(&courses).Error
+	err := Db.Model(&Course{}).Where("teacher_id = ?", teacherID).Find(&courses).Error
 	if err != nil && err != gorm.ErrRecordNotFound {
 		logging.Error(err)
 		return nil, err

@@ -2,9 +2,12 @@ package token
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis"
+	"github.com/hollowdjj/course-selecting-sys/models"
 	"github.com/hollowdjj/course-selecting-sys/pkg/app"
 	"github.com/hollowdjj/course-selecting-sys/pkg/e"
 	"github.com/hollowdjj/course-selecting-sys/pkg/gredis"
+	"github.com/hollowdjj/course-selecting-sys/service/memeber_service"
 	"net/http"
 )
 
@@ -41,6 +44,23 @@ func Token(c *gin.Context) {
 		return
 	}
 
-	//token在redis中存在时，才将请求交给下一个中间件
+	//token存在，那么在redis中由token找到username，然后再对比username对应的token
+	var member models.MemberInfo
+	httpCode, errCode := memeber_service.GetMemberInfoFromRedis(token, &member)
+	if errCode != e.OK {
+		gredis.Delete(token)
+		appG.Response(httpCode, errCode, nil)
+		c.Abort()
+		return
+	}
+
+	storedToken, err := gredis.Rdb.Get(member.Username).Result()
+	if err == redis.Nil || storedToken != token {
+		gredis.Delete(token)
+		appG.Response(http.StatusUnauthorized, e.LoginRequired, nil)
+		c.Abort()
+		return
+	}
+
 	c.Next()
 }

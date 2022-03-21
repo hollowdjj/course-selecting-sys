@@ -3,6 +3,7 @@ package v1
 import (
 	"encoding/json"
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis"
 	"github.com/hollowdjj/course-selecting-sys/models"
 	"github.com/hollowdjj/course-selecting-sys/pkg/app"
 	"github.com/hollowdjj/course-selecting-sys/pkg/e"
@@ -24,7 +25,7 @@ func Login(c *gin.Context) {
 	)
 
 	//表单验证
-	httpCode, errCode := app.BindAndValid(c, &auth)
+	httpCode, errCode := app.BindAndValid(c, &auth, true)
 	if errCode != e.OK {
 		appG.Response(httpCode, errCode, nil)
 		return
@@ -53,8 +54,8 @@ func Logout(c *gin.Context) {
 	//获取用户的token，并根据token在redis中获取用户信息
 	token := c.GetHeader("Authorization")
 	mem, err := gredis.Get(token)
-	if err != nil {
-		appG.Response(http.StatusInternalServerError, e.UnknownError, nil)
+	if err == redis.Nil {
+		appG.Response(http.StatusUnauthorized, e.LoginRequired, nil)
 		return
 	}
 
@@ -89,8 +90,8 @@ func WhoAmI(c *gin.Context) {
 
 	//查询redis得到用户信息
 	mem, err := gredis.Get(token)
-	if err != nil {
-		appG.Response(http.StatusInternalServerError, e.UnknownError, nil)
+	if err == redis.Nil {
+		appG.Response(http.StatusUnauthorized, e.LoginRequired, nil)
 		return
 	}
 	var member models.MemberInfo
