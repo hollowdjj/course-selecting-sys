@@ -1,21 +1,18 @@
 package v1
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"github.com/hollowdjj/course-selecting-sys/models"
 	"github.com/hollowdjj/course-selecting-sys/pkg/app"
-	"github.com/hollowdjj/course-selecting-sys/pkg/e"
+	"github.com/hollowdjj/course-selecting-sys/pkg/constval"
+	"github.com/hollowdjj/course-selecting-sys/pkg/logger"
 	"github.com/hollowdjj/course-selecting-sys/pkg/utility"
-	"gorm.io/gorm"
-	"net/http"
+	"github.com/sirupsen/logrus"
 )
 
-type CreateCourseForm struct {
-	Name string `form:"name" valid:"Required;MaxSize(255)"`
-	Cap  uint   `form:"cap" valid:"Required"`
-}
-
-//@Summary 创建课程
+//@Summary creat course
 //@Produce json
 //@Param name query string false "Name"
 //@Param cap query uint false "Cap"
@@ -24,41 +21,42 @@ type CreateCourseForm struct {
 func CreateCourse(c *gin.Context) {
 	var (
 		appG = app.Gin{C: c}
-		form CreateCourseForm
+		form models.CreateCourseForm
 	)
-	//表单验证
+
+	//form validation
 	httpCode, errCode := app.BindAndValid(c, &form, false)
-	if errCode != e.OK {
+	if errCode != constval.OK {
+		logger.GetInstance().WithFields(logrus.Fields{
+			"name": form.Name,
+			"cap":  form.Cap,
+			"msg":  constval.GetErrCodeMsg(errCode),
+		}).Infoln("create course form invalid")
 		appG.Response(httpCode, errCode, nil)
 		return
 	}
 
-	//表单验证通过后，查看课程名称是否存在
-	exist, err := models.IsCourseExistByName(form.Name)
-	if err != nil {
-		appG.Response(http.StatusInternalServerError, e.UnknownError, nil)
-		return
-	}
-	if exist {
-		appG.Response(http.StatusBadRequest, e.CourseExisted, nil)
-		return
-	}
-
-	//课程不存在，那么创建课程
-	id, err := models.CreateCourse(form.Name, form.Cap)
-	if err != nil {
-		appG.Response(http.StatusInternalServerError, e.UnknownError, nil)
+	//creat course
+	course := &models.Course{CourseName: form.Name, Cap: form.Cap, RemainCap: form.Cap}
+	httpCode, errCode = form.CreateCourse(course)
+	if errCode != constval.OK {
+		logger.GetInstance().WithFields(logrus.Fields{
+			"course_name": form.Name,
+			"cap":         form.Cap,
+			"msg":         constval.GetErrCodeMsg(errCode),
+		}).Infoln("create course fail")
+		appG.Response(httpCode, errCode, nil)
 		return
 	}
 
-	appG.Response(http.StatusOK, e.OK, map[string]interface{}{"course_id": id})
+	logger.GetInstance().WithFields(logrus.Fields{
+		"course_name": form.Name,
+		"cap":         form.Cap,
+	}).Infoln("create course succ")
+	appG.Response(httpCode, errCode, map[string]interface{}{"course_id": course.CourseID})
 }
 
-type GetCourseForm struct {
-	CourseID uint64 `form:"course_id" valid:"Required;"`
-}
-
-//@Summary 获取课程信息
+//@Summary get course info
 //@Produce json
 //@Param course_id query uint false "CourseList"
 //@Success 200 {string} json "{"code":200,"data":{course},"msg":{"ok"}}"
@@ -66,36 +64,34 @@ type GetCourseForm struct {
 func GetCourse(c *gin.Context) {
 	var (
 		appG = app.Gin{C: c}
-		form GetCourseForm
+		form models.GetCourseForm
 	)
 
-	//表单验证
+	//form validation
 	httpCode, errCode := app.BindAndValid(c, &form, false)
-	if errCode != e.OK {
+	if errCode != constval.OK {
+		logger.GetInstance().WithField("course_id", form.CourseID).Infoln("get course form invalid")
 		appG.Response(httpCode, errCode, nil)
 		return
 	}
 
-	//表单验证成功后，获取课程信息
-	info, err := models.GetCourseInfo(form.CourseID)
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			appG.Response(http.StatusBadRequest, e.CourseNotExisted, nil)
-		} else {
-			appG.Response(http.StatusInternalServerError, e.UnknownError, nil)
-		}
+	//get course info
+	course := &models.Course{}
+	httpCode, errCode = form.GetCourseInfo(course)
+	if errCode != constval.OK {
+		logger.GetInstance().WithFields(logrus.Fields{
+			"course_id": form.CourseID,
+			"msg":       constval.GetErrCodeMsg(errCode),
+		}).Infoln("get course info fail")
+		appG.Response(httpCode, errCode, nil)
 		return
 	}
 
-	appG.Response(http.StatusOK, e.OK, map[string]interface{}{"course:": info})
+	logger.GetInstance().WithField("course_id", form.CourseID).Info("get course info succ")
+	appG.Response(http.StatusOK, constval.OK, map[string]interface{}{"course:": *course})
 }
 
-type BindCourseForm struct {
-	CourseID  uint64 `form:"course_id" valid:"Required"`
-	TeacherID uint64 `form:"teacher_id" valid:"Required"`
-}
-
-//@Summary  将教师与课程绑定
+//@Summary  bind course with teacher
 //@Produce json
 //@Param course_id query uint64 false "CourseList"
 //@Param teacher_id query uint64 false "TeacherID"
@@ -104,43 +100,39 @@ type BindCourseForm struct {
 func BindCourse(c *gin.Context) {
 	var (
 		appG = app.Gin{C: c}
-		form BindCourseForm
+		form models.BindCourseForm
 	)
 
-	//表单验证
+	//form validation
 	httpCode, errCode := app.BindAndValid(c, &form, true)
-	if errCode != e.OK {
+	if errCode != constval.OK {
+		logger.GetInstance().WithFields(logrus.Fields{
+			"course_id":  form.CourseID,
+			"teacher_id": form.TeacherID,
+		}).Infoln("bind course form invalid")
 		appG.Response(httpCode, errCode, nil)
 		return
 	}
 
-	//表单验证通过后，查询课程是否已被绑定
-	bound, err := models.IsCourseBound(form.CourseID)
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			appG.Response(http.StatusBadRequest, e.CourseNotExisted, nil)
-		} else {
-			appG.Response(http.StatusInternalServerError, e.UnknownError, nil)
-		}
-		return
-	}
-	if bound {
-		appG.Response(http.StatusBadRequest, e.CourseHasBound, nil)
+	httpCode, errCode = form.BindCourse()
+	if errCode != constval.OK {
+		logger.GetInstance().WithFields(logrus.Fields{
+			"course_id":  form.CourseID,
+			"teacher_id": form.TeacherID,
+			"msg":        constval.GetErrCodeMsg(errCode),
+		}).Infoln("bind course fail")
+		appG.Response(httpCode, errCode, nil)
 		return
 	}
 
-	//若课程存在且未绑定时，绑定课程。需要注意的是，项目中的抢课部分是一个单独的算法题
-	//因此，提供的teacher_id可能在数据库中根本不存在，故这里不做落库校验。
-	err = models.BindCourse(form.CourseID, form.TeacherID)
-	if err != nil {
-		appG.Response(http.StatusInternalServerError, e.UnknownError, nil)
-		return
-	}
-
-	appG.Response(http.StatusOK, e.OK, nil)
+	logger.GetInstance().WithFields(logrus.Fields{
+		"course_id":  form.CourseID,
+		"teacher_id": form.TeacherID,
+	}).Infoln("bind course succ")
+	appG.Response(httpCode, errCode, nil)
 }
 
-//@Summary 将老师与课程解绑
+//@Summary unbind course and teacher
 //@Produce json
 //@Param course_id query uint64 false "CourseList"
 //@Param teacher_id query uint64 false "TeacherID"
@@ -149,46 +141,40 @@ func BindCourse(c *gin.Context) {
 func UnBindCourse(c *gin.Context) {
 	var (
 		appG = app.Gin{C: c}
-		form BindCourseForm
+		form models.BindCourseForm
 	)
 
-	//表单验证
+	//form validation
 	httpCode, errCode := app.BindAndValid(c, &form, true)
-	if errCode != e.OK {
+	if errCode != constval.OK {
+		logger.GetInstance().WithFields(logrus.Fields{
+			"course_id":  form.CourseID,
+			"teacher_id": form.TeacherID,
+			"msg":        constval.GetErrCodeMsg(errCode),
+		}).Infoln("unbind course form invalid")
 		appG.Response(httpCode, errCode, nil)
 		return
 	}
 
-	//表单验证通过后，判断课程是否被绑定过
-	bound, err := models.IsCourseBound(form.CourseID)
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			appG.Response(http.StatusBadRequest, e.CourseNotExisted, nil)
-		} else {
-			appG.Response(http.StatusInternalServerError, e.UnknownError, nil)
-		}
-		return
-	}
-	if !bound {
-		appG.Response(http.StatusBadRequest, e.CourseNotBind, nil)
+	//unbind course
+	if errCode != constval.OK {
+		logger.GetInstance().WithFields(logrus.Fields{
+			"course_id":  form.CourseID,
+			"teacher_id": form.TeacherID,
+			"msg":        constval.GetErrCodeMsg(errCode),
+		}).Infoln("unbind course fail")
+		appG.Response(httpCode, errCode, nil)
 		return
 	}
 
-	//课程存在且被绑定时，解绑课程
-	err = models.UnBindCourse(form.CourseID, form.TeacherID)
-	if err != nil {
-		appG.Response(http.StatusInternalServerError, e.UnknownError, nil)
-		return
-	}
-
-	appG.Response(http.StatusOK, e.OK, nil)
+	logger.GetInstance().WithFields(logrus.Fields{
+		"course_id":  form.CourseID,
+		"teacher_id": form.TeacherID,
+	}).Infoln("unbind course succ")
+	appG.Response(httpCode, errCode, nil)
 }
 
-type GetTeacherCourseForm struct {
-	TeacherID uint64 `form:"teacher_id" valid:"Required"`
-}
-
-//@Summary 获取一个老师的全部课程
+//@Summary get all courses of teacher
 //@Produce json
 //@Param teacher_id query uint64 false "TeacherID"
 //@Success 200 {string} json "{"code":200,"data":{courses},"msg":{"ok"}}"
@@ -196,24 +182,34 @@ type GetTeacherCourseForm struct {
 func GetTeacherCourses(c *gin.Context) {
 	var (
 		appG = app.Gin{C: c}
-		form GetTeacherCourseForm
+		form models.GetTeacherCourseForm
 	)
 
-	//表单验证
+	//form validation
 	httpCode, errCode := app.BindAndValid(c, &form, false)
-	if errCode != e.OK {
+	if errCode != constval.OK {
+		logger.GetInstance().WithFields(logrus.Fields{
+			"teacher_id": form.TeacherID,
+			"msg":        constval.GetErrCodeMsg(errCode),
+		}).Infoln("get teacher course form invalid")
 		appG.Response(httpCode, errCode, nil)
 		return
 	}
 
-	//表单验证通过后，查询老师的全部课程
-	courses, err := models.GetTeacherCourses(form.TeacherID)
-	if err != nil {
-		appG.Response(http.StatusInternalServerError, e.UnknownError, nil)
+	//get courses
+	courses := &[]models.Course{}
+	httpCode, errCode = form.GetTeacherCourses(courses)
+	if errCode != constval.OK {
+		logger.GetInstance().WithFields(logrus.Fields{
+			"teacher_id": form.TeacherID,
+			"msg":        constval.GetErrCodeMsg(errCode),
+		}).Infoln("get teacher course fail")
+		appG.Response(httpCode, errCode, nil)
 		return
 	}
 
-	appG.Response(http.StatusOK, e.OK, map[string]interface{}{"course_list": courses})
+	logger.GetInstance().WithField("teacher_id", form.TeacherID).Infoln("get teacher course succ")
+	appG.Response(httpCode, errCode, map[string]interface{}{"course_list": courses})
 }
 
 func Schedule(c *gin.Context) {
@@ -233,5 +229,5 @@ func Schedule(c *gin.Context) {
 		"u5": []string{"v3", "v5"},
 		"u6": []string{"v1", "v3"},
 	}
-	appG.Response(http.StatusOK, e.OK, utility.MaxMatch(data))
+	appG.Response(http.StatusOK, constval.OK, utility.MaxMatch(data))
 }

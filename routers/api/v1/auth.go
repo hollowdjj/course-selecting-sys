@@ -2,17 +2,18 @@ package v1
 
 import (
 	"encoding/json"
+	"net/http"
+
 	"github.com/gin-gonic/gin"
-	"github.com/go-redis/redis"
+	"github.com/hollowdjj/course-selecting-sys/cache"
 	"github.com/hollowdjj/course-selecting-sys/models"
 	"github.com/hollowdjj/course-selecting-sys/pkg/app"
-	"github.com/hollowdjj/course-selecting-sys/pkg/e"
-	"github.com/hollowdjj/course-selecting-sys/pkg/gredis"
-	"github.com/hollowdjj/course-selecting-sys/service/auth_service"
-	"net/http"
+	"github.com/hollowdjj/course-selecting-sys/pkg/constval"
+	"github.com/hollowdjj/course-selecting-sys/pkg/logger"
+	"github.com/sirupsen/logrus"
 )
 
-//@Summary 用户登录
+//@Summary user login
 //@Produce json
 //@Param username query string false "UserName"
 //@Param password query string false "Password"
@@ -21,85 +22,105 @@ import (
 func Login(c *gin.Context) {
 	var (
 		appG = app.Gin{C: c}
-		auth auth_service.Auth
+		form models.LoginForm
 	)
 
-	//表单验证
-	httpCode, errCode := app.BindAndValid(c, &auth, true)
-	if errCode != e.OK {
+	//form validation
+	httpCode, errCode := app.BindAndValid(c, &form, true)
+	if errCode != constval.OK {
+		logger.GetInstance().WithFields(logrus.Fields{
+			"username": form.Username,
+			"msg":      constval.GetErrCodeMsg(errCode),
+		}).Infoln("login form invalid")
 		appG.Response(httpCode, errCode, nil)
 		return
 	}
 
-	//表单验证通过，那么登录
-	pass, token, err := auth.Login()
-	if err != nil {
-		appG.Response(http.StatusInternalServerError, e.UnknownError, nil)
-		return
-	}
-	if !pass {
-		appG.Response(http.StatusUnauthorized, e.WrongPassword, nil)
+	//try login
+	var token *string
+	httpCode, errCode = form.Login(token)
+	if errCode != constval.OK {
+		logger.GetInstance().WithFields(logrus.Fields{
+			"username": form.Username,
+			"msg":      constval.GetErrCodeMsg(errCode),
+		}).Infoln("login fail")
+		appG.Response(httpCode, errCode, nil)
 		return
 	}
 
-	//登录成功返回登录用户的ID以及服务端生成的token
-	c.Header("Authorization", token)
-	appG.Response(http.StatusOK, e.OK, nil)
+	//response token to client
+	logger.GetInstance().WithField("user", form.Username).Infoln("user login succ")
+	c.Header("Authorization", *token)
+	appG.Response(httpCode, errCode, nil)
 }
 
-//Logout 登出
+//Logout
 func Logout(c *gin.Context) {
 	appG := app.Gin{C: c}
 
-	//获取用户的token，并根据token在redis中获取用户信息
+	//get token
 	token := c.GetHeader("Authorization")
-	mem, err := gredis.Get(token)
-	if err == redis.Nil {
-		appG.Response(http.StatusUnauthorized, e.LoginRequired, nil)
+
+	//del cache
+	groupCacheToken := cache.GetGroupCache("login")
+	if groupCacheToken == nil {
+		appG.Response(http.StatusUnauthorized, constval.LoginRequired, nil)
+		return
+	}
+	val, _ := groupCacheToken.Get(token, cache.Option{
+		FromLocal:  true,
+		FromPeer:   false,
+		FromGetter: false,
+	})
+	if val.Len() == 0 {
+		appG.Response(http.StatusUnauthorized, constval.LoginRequired, nil)
 		return
 	}
 
-	var memberAuth models.MemberInfo
-	err = json.Unmarshal(mem, &memberAuth)
+	//unmarshal user info to get username
+	userInfo := &models.UserInfo{}
+	err := json.Unmarshal(val.ByteSlice(), userInfo)
 	if err != nil {
-		appG.Response(http.StatusInternalServerError, e.UnknownError, nil)
-		return
+		logger.GetInstance().WithField("err", err).Errorln("json unmarshal fail")
 	}
-
-	//删除token
-	_, err = gredis.Delete(token)
-	if err != nil {
-		appG.Response(http.StatusInternalServerError, e.UnknownError, nil)
-		return
-	}
-	_, err = gredis.Delete(memberAuth.Username)
-	if err != nil {
-		appG.Response(http.StatusInternalServerError, e.UnknownError, nil)
-		return
-	}
-
-	appG.Response(http.StatusOK, e.OK, nil)
+	//del cache
+	groupCacheToken.Del(token)
+	groupCacheToken.Del(userInfo.Username)
+	appG.Response(http.StatusOK, constval.OK, nil)
+	logger.GetInstance().WithField("user", userInfo.Username).Infoln("user logout succ")
 }
 
-//WhoAmI 获取个人信息
+//WhoAmI get user infomation
 func WhoAmI(c *gin.Context) {
 	appG := app.Gin{C: c}
 
-	//获取token
+	//get token
 	token := c.GetHeader("Authorization")
 
-	//查询redis得到用户信息
-	mem, err := gredis.Get(token)
-	if err == redis.Nil {
-		appG.Response(http.StatusUnauthorized, e.LoginRequired, nil)
+	//look up cache
+	groupCacheToken := cache.GetGroupCache("login")
+	if groupCacheToken == nil {
+		appG.Response(http.StatusUnauthorized, constval.LoginRequired, nil)
 		return
 	}
-	var member models.MemberInfo
-	err = json.Unmarshal(mem, &member)
-	if err != nil {
-		appG.Response(http.StatusInternalServerError, e.UnknownError, nil)
+	val, _ := groupCacheToken.Get(token, cache.Option{
+		FromLocal:  true,
+		FromPeer:   false,
+		FromGetter: false,
+	})
+	if val.Len() == 0 {
+		appG.Response(http.StatusUnauthorized, constval.LoginRequired, nil)
 		return
 	}
 
-	appG.Response(http.StatusOK, e.OK, map[string]interface{}{"member_info": member})
+	//unmarshal user info
+	userInfo := &models.UserInfo{}
+	err := json.Unmarshal(val.ByteSlice(), userInfo)
+	if err != nil {
+		logger.GetInstance().WithField("err", err).Errorln("json unmarshal fail")
+		appG.Response(http.StatusInternalServerError, constval.UnknownError, nil)
+		return
+	}
+
+	appG.Response(http.StatusOK, constval.OK, map[string]interface{}{"user_info": userInfo})
 }

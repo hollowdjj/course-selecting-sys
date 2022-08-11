@@ -1,8 +1,9 @@
 package utility
 
 import (
-	"github.com/astaxie/beego/validation"
 	"unicode"
+
+	"github.com/astaxie/beego/validation"
 )
 
 func PasswordCheck(v *validation.Validation, obj interface{}, key string) {
@@ -32,4 +33,15 @@ func PasswordCheck(v *validation.Validation, obj interface{}, key string) {
 		return
 	}
 	v.SetError("Password", "Wrong Password format")
+}
+
+func ModeCheck(v *validation.Validation, obj interface{}, key string) {
+	mode, ok := obj.(string)
+	if !ok {
+		return
+	}
+	if mode == "usual" || mode == "proxy" {
+		return
+	}
+	v.SetError("Mode", "Wrong mode")
 }

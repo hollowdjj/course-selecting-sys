@@ -1,14 +1,12 @@
-package token
+package middleware
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/go-redis/redis"
-	"github.com/hollowdjj/course-selecting-sys/models"
-	"github.com/hollowdjj/course-selecting-sys/pkg/app"
-	"github.com/hollowdjj/course-selecting-sys/pkg/e"
-	"github.com/hollowdjj/course-selecting-sys/pkg/gredis"
-	"github.com/hollowdjj/course-selecting-sys/service/memeber_service"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"github.com/hollowdjj/course-selecting-sys/cache"
+	"github.com/hollowdjj/course-selecting-sys/pkg/app"
+	"github.com/hollowdjj/course-selecting-sys/pkg/constval"
 )
 
 /*
@@ -19,48 +17,41 @@ Gin中间件的作用有两个：
 为*gin.Context且没有返回值的函数
 */
 
-//创建一个gin中间件
+//a token middleware
 func Token(c *gin.Context) {
 	appG := app.Gin{C: c}
 
-	//获取header中的token
+	//get token from request header
 	token := c.GetHeader("Authorization")
 	if token == "" {
-		appG.Response(http.StatusUnauthorized, e.LoginRequired, nil)
+		appG.Response(http.StatusUnauthorized, constval.LoginRequired, nil)
 		c.Abort()
 		return
 	}
 
-	//在redis中查找token是否存在
-	exist, err := gredis.Exist(token)
+	//find token in local cache
+	groupCacheLogin := cache.GetGroupCache("login")
+	if groupCacheLogin == nil {
+		appG.Response(http.StatusUnauthorized, constval.LoginRequired, nil)
+		c.Abort()
+		return
+	}
+	val, err := groupCacheLogin.Get(token, cache.Option{
+		FromLocal:  true,
+		FromPeer:   false,
+		FromGetter: false,
+	})
 	if err != nil {
-		appG.Response(http.StatusInternalServerError, e.UnknownError, nil)
+		appG.Response(http.StatusInternalServerError, constval.UnknownError, nil)
 		c.Abort()
 		return
 	}
-	if !exist {
-		appG.Response(http.StatusUnauthorized, e.LoginRequired, nil)
-		c.Abort()
-		return
-	}
-
-	//token存在，那么在redis中由token找到username，然后再对比username对应的token
-	var member models.MemberInfo
-	httpCode, errCode := memeber_service.GetMemberInfoFromRedis(token, &member)
-	if errCode != e.OK {
-		gredis.Delete(token)
-		appG.Response(httpCode, errCode, nil)
+	if val.Len() == 0 {
+		appG.Response(http.StatusUnauthorized, constval.LoginRequired, nil)
 		c.Abort()
 		return
 	}
 
-	storedToken, err := gredis.Rdb.Get(member.Username).Result()
-	if err == redis.Nil || storedToken != token {
-		gredis.Delete(token)
-		appG.Response(http.StatusUnauthorized, e.LoginRequired, nil)
-		c.Abort()
-		return
-	}
-
+	//go next if find token in local cache
 	c.Next()
 }

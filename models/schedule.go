@@ -1,138 +1,183 @@
 package models
 
 import (
-	"github.com/hollowdjj/course-selecting-sys/pkg/logging"
+	"encoding/json"
+	"net/http"
+
+	"github.com/hollowdjj/course-selecting-sys/cache"
+	"github.com/hollowdjj/course-selecting-sys/pkg/constval"
+	"github.com/hollowdjj/course-selecting-sys/pkg/logger"
+	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
-//课程Model
-type Course struct {
-	CourseID    uint64 `gorm:"primaryKey" json:"course_id"`
-	CourseName  string `json:"course_name"`
-	Cap         uint   `json:"cap"`
-	RemainCap   uint   `json:"remain_cap"`
-	TeacherID   uint64 `json:"teacher_id"`
-	TeacherName string `json:"teacher_name"`
+const (
+	maxCourseInfoCacheBytes = 128 * 1024 * 1024 //128MB
+)
+
+//used for creating course
+type CreateCourseForm struct {
+	Name string `form:"name" valid:"Required;MaxSize(255)"`
+	Cap  uint   `form:"cap" valid:"Required"`
 }
 
-//根据课程名称查询课程是否已存在
-func IsCourseExistByName(name string) (bool, error) {
-	var course Course
-	err := Db.Model(&Course{}).Select("course_id").
-		Where("course_name = ?", name).First(&course).Error
+//create course if not exist
+func (c CreateCourseForm) CreateCourse(course *Course) (int, constval.ErrNo) {
+	result := Db.FirstOrCreate(course)
+	if err := result.Error; err != nil {
+		logger.GetInstance().WithFields(logrus.Fields{
+			"name": c.Name,
+			"cap":  c.Cap,
+			"err":  err,
+		}).Errorln("create course error")
+		return http.StatusInternalServerError, constval.UnknownError
+	}
+	if result.RowsAffected == 0 {
+		logger.GetInstance().WithFields(logrus.Fields{
+			"name": c.Name,
+			"cap":  c.Cap,
+		}).Errorln("course already exist")
+		return http.StatusBadRequest, constval.CourseExisted
+	}
+	return http.StatusOK, constval.OK
+}
+
+//used for getting course info
+type GetCourseForm struct {
+	CourseID string `form:"course_id" valid:"Required;"`
+}
+
+func (g GetCourseForm) GetCourseInfo(course *Course) (int, constval.ErrNo) {
+	//load cache
+	courseInfoCache := cache.GetGroupCache("course_info")
+	if courseInfoCache == nil {
+		//do not register peerpick first
+		courseInfoCache = cache.NewGroupCache("course_info", maxCourseInfoCacheBytes,
+			cache.GetterFunc(CourseInfoGetter))
+	}
+	val, err := courseInfoCache.Get(g.CourseID, cache.DefaultOption)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return false, nil
+		logger.GetInstance().WithFields(logrus.Fields{
+			"course_id": g.CourseID,
+			"err":       err,
+		}).Errorln("get course info cache error")
+	}
+	if len(val.ByteSlice()) == 0 {
+		logger.GetInstance().WithField("course_id", g.CourseID).Infoln("course not exist")
+		return http.StatusBadRequest, constval.CourseNotExist
+	}
+
+	//unmarshal
+	err = json.Unmarshal(val.ByteSlice(), course)
+	if err != nil {
+		courseInfoCache.Del(g.CourseID)
+		logger.GetInstance().WithField("err", err).Errorln("json unmarshal course info error")
+		return http.StatusInternalServerError, constval.UnknownError
+	}
+
+	return http.StatusOK, constval.OK
+}
+
+//used for binding course
+type BindCourseForm struct {
+	CourseID  string `form:"course_id" valid:"Required"`
+	TeacherID string `form:"teacher_id" valid:"Required"`
+}
+
+func (b BindCourseForm) BindCourse() (int, constval.ErrNo) {
+	course := &Course{}
+	err := Db.Transaction(func(tx *gorm.DB) error {
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("teacher_id").
+			Where("course_id = ?", b.CourseID).First(course).Error
+		if err != nil {
+			return err
 		}
-		logging.Error(err)
-		return false, err
-	}
-	if course.CourseID > 0 {
-		return true, nil
-	}
-
-	return false, nil
-}
-
-//根据课程ID查询课程是否已存在
-func IsCourseExistByID(id uint64) (bool, error) {
-	var course Course
-	err := Db.Model(&Course{}).Select("course_id").
-		Where("course_id = ?", id).First(&course).Error
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return false, nil
+		if course.TeacherID != nil {
+			return nil
 		}
-		logging.Error(err)
-		return false, err
-	}
-	if course.CourseID > 0 {
-		return true, nil
-	}
-
-	return false, nil
-}
-
-//根据课程ID查询课程是否已经被绑定
-//课程不存在时，返回false,gorm.ErrRecordNotFound
-//课程存在，但未绑定时，返回false,nil
-//课程存在，但已绑定时，返回true,nil
-func IsCourseBound(id uint64) (bool, error) {
-	var course Course
-	err := Db.Model(&Course{}).Select("teacher_id").
-		Where("course_id = ?", id).First(&course).Error
-	if err != nil {
-		if err != gorm.ErrRecordNotFound {
-			logging.Error(err)
+		err = tx.Model(&Course{}).Select("teacher_id").Where("course_id = ?", b.CourseID).
+			Update("teacher_id", b.TeacherID).Error
+		if err != nil {
+			return err
 		}
-		return false, err
-	}
-	if course.TeacherID > 0 {
-		return true, nil
-	}
-	return false, nil
-}
 
-//创建课程并返回课程的ID
-func CreateCourse(name string, cap uint) (uint64, error) {
-	course := Course{CourseName: name, Cap: cap, RemainCap: cap}
-	err := Db.Model(&Course{}).Create(&course).Error
+		return nil
+	})
 	if err != nil {
-		logging.Error(err)
-		return 0, err
+		logger.GetInstance().WithFields(logrus.Fields{
+			"course_id":  b.CourseID,
+			"teacher_id": b.TeacherID,
+			"err":        err,
+		}).Errorln("bind course error")
+		return http.StatusInternalServerError, constval.UnknownError
 	}
-	return course.CourseID, nil
+
+	if course.TeacherID != nil {
+		logger.GetInstance().WithFields(logrus.Fields{
+			"course_id":  b.CourseID,
+			"teacher_id": course.TeacherID,
+		}).Infoln("course has been bound")
+		return http.StatusOK, constval.CourseHasBound
+	}
+	return http.StatusOK, constval.OK
 }
 
-type CourseInfo struct {
-	CourseID   uint64 `json:"course_id"`
-	CourseName string `json:"course_name"`
-	TeacherID  uint64 `json:"teacher_id"`
-}
-
-//根据课程ID获取课程信息
-func GetCourseInfo(id uint64) (CourseInfo, error) {
-	var info CourseInfo
-	err := Db.Model(&Course{}).Where("course_id = ?", id).First(&info).Error
-	if err != nil {
-		if err != gorm.ErrRecordNotFound {
-			logging.Error(err)
+func (b BindCourseForm) UnBindCourse() (int, constval.ErrNo) {
+	course := &Course{}
+	err := Db.Transaction(func(tx *gorm.DB) error {
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("teacher_id").
+			Where("course_id = ?", b.CourseID).First(course).Error
+		if err != nil {
+			return err
 		}
-		return CourseInfo{}, err
-	}
-	return info, nil
-}
+		if course.TeacherID != nil {
+			return nil
+		}
+		err = tx.Model(&Course{}).Select("teacher_id").Where("course_id = ?", b.CourseID).
+			Update("teacher_id", 0).Error
+		if err != nil {
+			return err
+		}
 
-//绑定课程。即将Course表中对应课程的teacher_id字段更更新为teacherID
-func BindCourse(courseID, teacherID uint64) error {
-	err := Db.Model(&Course{}).Where("course_id = ?", courseID).
-		Update("teacher_id", teacherID).Error
+		return nil
+	})
 	if err != nil {
-		logging.Error(err)
-		return err
+		logger.GetInstance().WithFields(logrus.Fields{
+			"course_id":  b.CourseID,
+			"teacher_id": b.TeacherID,
+			"err":        err,
+		}).Errorln("unbind course error")
+		return http.StatusInternalServerError, constval.UnknownError
 	}
-	return nil
+
+	if course.TeacherID != nil {
+		logger.GetInstance().WithFields(logrus.Fields{
+			"course_id":  b.CourseID,
+			"teacher_id": course.TeacherID,
+		}).Infoln("course has been bound")
+		return http.StatusOK, constval.CourseHasBound
+	}
+	return http.StatusOK, constval.OK
 }
 
-//解绑课程。即将Course表对应课程的teacher_id字段更新为0
-func UnBindCourse(courseID, teacherID uint64) error {
-	err := Db.Model(&Course{}).Where("course_id = ? AND teacher_id = ?", courseID, teacherID).
-		Update("teacher_id", 0).Error
-
-	if err != nil {
-		logging.Error(err)
-		return err
-	}
-	return nil
+//used for getting teacher courses
+type GetTeacherCourseForm struct {
+	TeacherID uint64 `form:"teacher_id" valid:"Required"`
 }
 
-//查询一个老师的全部课程
-func GetTeacherCourses(teacherID uint64) ([]CourseInfo, error) {
-	courses := make([]CourseInfo, 0)
-	err := Db.Model(&Course{}).Where("teacher_id = ?", teacherID).Find(&courses).Error
-	if err != nil && err != gorm.ErrRecordNotFound {
-		logging.Error(err)
-		return nil, err
+func (g GetTeacherCourseForm) GetTeacherCourses(courses *[]Course) (int, constval.ErrNo) {
+	result := Db.Model(&Course{}).Where("teacher_id = ?", g.TeacherID).Find(courses)
+	if err := result.Error; err != nil && err != gorm.ErrRecordNotFound {
+		logger.GetInstance().WithFields(logrus.Fields{
+			"teacher_id": g.TeacherID,
+			"err":        err,
+		}).Errorln("query teacher course error")
+		return http.StatusInternalServerError, constval.UnknownError
 	}
-	return courses, nil
+	if result.RowsAffected == 0 {
+		logger.GetInstance().WithField("teacher_id", g.TeacherID).Infoln("query teacher course empty")
+		return http.StatusOK, constval.TeacherHasNoCourse
+	}
+	return http.StatusOK, constval.OK
 }

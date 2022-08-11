@@ -2,30 +2,32 @@ package models
 
 import (
 	"fmt"
-	"github.com/hollowdjj/course-selecting-sys/pkg/setting"
+
+	"github.com/hollowdjj/course-selecting-sys/conf"
+	"github.com/hollowdjj/course-selecting-sys/pkg/logger"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 )
 
-var Db *gorm.DB //数据库
+var Db *gorm.DB //database
 
-//连接数据库
-func Setup() {
-	//连接数据库
+//connect database
+func InitDb() {
 	var err error
+	dbConf := conf.GetDb()
 	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-		setting.DatabaseSetting.User,
-		setting.DatabaseSetting.Password,
-		setting.DatabaseSetting.Host,
-		setting.DatabaseSetting.Name)
+		dbConf.User,
+		dbConf.Password,
+		dbConf.Host,
+		dbConf.Name)
 	Db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
 		NamingStrategy: schema.NamingStrategy{
 			SingularTable: true,
 		},
 	})
 	if err != nil {
-		panic(err)
+		logger.GetInstance().Fatalf("connect to database fail")
 	}
 	mysqlDB, _ := Db.DB()
 	mysqlDB.SetMaxIdleConns(10)
